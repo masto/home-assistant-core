@@ -37,6 +37,8 @@ from homeassistant.helpers.event import async_track_time_change
 from homeassistant.util import convert
 import homeassistant.util.dt as dt_util
 
+from homeassistant.exceptions import ConfigEntryNotReady
+
 from . import const, websocket_api as wsapi, workaround
 from .const import (
     CONF_AUTOHEAL,
@@ -349,6 +351,7 @@ async def async_setup_entry(hass, config_entry):  # noqa: C901
     from openzwave.group import ZWaveGroup
     from openzwave.network import ZWaveNetwork
     from openzwave.option import ZWaveOption
+    from openzwave.object import ZWaveException
 
     # pylint: enable=import-error
     from pydispatch import dispatcher
@@ -394,11 +397,20 @@ async def async_setup_entry(hass, config_entry):  # noqa: C901
     _LOGGER.info("Z-Wave USB path is %s", usb_path)
 
     # Setup options
-    options = ZWaveOption(
-        usb_path,
-        user_path=hass.config.config_dir,
-        config_path=config.get(CONF_CONFIG_PATH),
-    )
+    try:
+        options = ZWaveOption(
+            usb_path,
+            user_path=hass.config.config_dir,
+            config_path=config.get(CONF_CONFIG_PATH),
+        )
+
+    except (ZWaveException) as exception:
+        _LOGGER.error(
+            "Couldn't configure Z-Wave on %s",
+            usb_path,
+            exc_info=exception,
+        )
+        raise ConfigEntryNotReady from exception
 
     options.set_console_output(use_debug)
 
@@ -1017,7 +1029,7 @@ async def async_setup_entry(hass, config_entry):  # noqa: C901
         _LOGGER.info("Z-Wave network autoheal is enabled")
         async_track_time_change(hass, heal_network, hour=0, minute=0, second=0)
 
-    hass.bus.async_listen_once(EVENT_HOMEASSISTANT_START, start_zwave)
+    hass.helpers.event.async_call_later(1, start_zwave)
 
     hass.services.async_register(DOMAIN, const.SERVICE_START_NETWORK, start_zwave)
 
