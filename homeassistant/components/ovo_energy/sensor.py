@@ -1,25 +1,23 @@
 """Support for OVO Energy sensors."""
 from datetime import timedelta
-import logging
 
 from ovoenergy import OVODailyUsage
 from ovoenergy.ovoenergy import OVOEnergy
 
+from homeassistant.components.sensor import SensorEntity
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.helpers.typing import HomeAssistantType
+from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
 from . import OVOEnergyDeviceEntity
 from .const import DATA_CLIENT, DATA_COORDINATOR, DOMAIN
-
-_LOGGER = logging.getLogger(__name__)
 
 SCAN_INTERVAL = timedelta(seconds=300)
 PARALLEL_UPDATES = 4
 
 
 async def async_setup_entry(
-    hass: HomeAssistantType, entry: ConfigEntry, async_add_entities
+    hass: HomeAssistant, entry: ConfigEntry, async_add_entities
 ) -> None:
     """Set up OVO Energy sensor based on a config entry."""
     coordinator: DataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id][
@@ -53,12 +51,10 @@ async def async_setup_entry(
                 )
             )
 
-    async_add_entities(
-        entities, True,
-    )
+    async_add_entities(entities, True)
 
 
-class OVOEnergySensor(OVOEnergyDeviceEntity):
+class OVOEnergySensor(OVOEnergyDeviceEntity, SensorEntity):
     """Defines a OVO Energy sensor."""
 
     def __init__(
@@ -84,7 +80,7 @@ class OVOEnergySensor(OVOEnergyDeviceEntity):
 class OVOEnergyLastElectricityReading(OVOEnergySensor):
     """Defines a OVO Energy last reading sensor."""
 
-    def __init__(self, coordinator: DataUpdateCoordinator, client: OVOEnergy):
+    def __init__(self, coordinator: DataUpdateCoordinator, client: OVOEnergy) -> None:
         """Initialize OVO Energy sensor."""
 
         super().__init__(
@@ -99,15 +95,15 @@ class OVOEnergyLastElectricityReading(OVOEnergySensor):
     @property
     def state(self) -> str:
         """Return the state of the sensor."""
-        usage: OVODailyUsage = self._coordinator.data
+        usage: OVODailyUsage = self.coordinator.data
         if usage is None or not usage.electricity:
             return None
         return usage.electricity[-1].consumption
 
     @property
-    def device_state_attributes(self) -> object:
+    def extra_state_attributes(self) -> object:
         """Return the attributes of the sensor."""
-        usage: OVODailyUsage = self._coordinator.data
+        usage: OVODailyUsage = self.coordinator.data
         if usage is None or not usage.electricity:
             return None
         return {
@@ -119,7 +115,7 @@ class OVOEnergyLastElectricityReading(OVOEnergySensor):
 class OVOEnergyLastGasReading(OVOEnergySensor):
     """Defines a OVO Energy last reading sensor."""
 
-    def __init__(self, coordinator: DataUpdateCoordinator, client: OVOEnergy):
+    def __init__(self, coordinator: DataUpdateCoordinator, client: OVOEnergy) -> None:
         """Initialize OVO Energy sensor."""
 
         super().__init__(
@@ -134,15 +130,15 @@ class OVOEnergyLastGasReading(OVOEnergySensor):
     @property
     def state(self) -> str:
         """Return the state of the sensor."""
-        usage: OVODailyUsage = self._coordinator.data
+        usage: OVODailyUsage = self.coordinator.data
         if usage is None or not usage.gas:
             return None
         return usage.gas[-1].consumption
 
     @property
-    def device_state_attributes(self) -> object:
+    def extra_state_attributes(self) -> object:
         """Return the attributes of the sensor."""
-        usage: OVODailyUsage = self._coordinator.data
+        usage: OVODailyUsage = self.coordinator.data
         if usage is None or not usage.gas:
             return None
         return {
@@ -156,7 +152,7 @@ class OVOEnergyLastElectricityCost(OVOEnergySensor):
 
     def __init__(
         self, coordinator: DataUpdateCoordinator, client: OVOEnergy, currency: str
-    ):
+    ) -> None:
         """Initialize OVO Energy sensor."""
         super().__init__(
             coordinator,
@@ -170,15 +166,15 @@ class OVOEnergyLastElectricityCost(OVOEnergySensor):
     @property
     def state(self) -> str:
         """Return the state of the sensor."""
-        usage: OVODailyUsage = self._coordinator.data
+        usage: OVODailyUsage = self.coordinator.data
         if usage is None or not usage.electricity:
             return None
         return usage.electricity[-1].cost.amount
 
     @property
-    def device_state_attributes(self) -> object:
+    def extra_state_attributes(self) -> object:
         """Return the attributes of the sensor."""
-        usage: OVODailyUsage = self._coordinator.data
+        usage: OVODailyUsage = self.coordinator.data
         if usage is None or not usage.electricity:
             return None
         return {
@@ -192,7 +188,7 @@ class OVOEnergyLastGasCost(OVOEnergySensor):
 
     def __init__(
         self, coordinator: DataUpdateCoordinator, client: OVOEnergy, currency: str
-    ):
+    ) -> None:
         """Initialize OVO Energy sensor."""
         super().__init__(
             coordinator,
@@ -206,15 +202,15 @@ class OVOEnergyLastGasCost(OVOEnergySensor):
     @property
     def state(self) -> str:
         """Return the state of the sensor."""
-        usage: OVODailyUsage = self._coordinator.data
+        usage: OVODailyUsage = self.coordinator.data
         if usage is None or not usage.gas:
             return None
         return usage.gas[-1].cost.amount
 
     @property
-    def device_state_attributes(self) -> object:
+    def extra_state_attributes(self) -> object:
         """Return the attributes of the sensor."""
-        usage: OVODailyUsage = self._coordinator.data
+        usage: OVODailyUsage = self.coordinator.data
         if usage is None or not usage.gas:
             return None
         return {

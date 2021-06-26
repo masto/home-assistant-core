@@ -9,12 +9,15 @@ from pysmartthings import ATTRIBUTES, CAPABILITIES, Attribute, Capability
 from homeassistant.components.sensor import DEVICE_CLASSES, DOMAIN as SENSOR_DOMAIN
 from homeassistant.components.smartthings import sensor
 from homeassistant.components.smartthings.const import DOMAIN, SIGNAL_SMARTTHINGS_UPDATE
+from homeassistant.config_entries import ConfigEntryState
 from homeassistant.const import (
     ATTR_FRIENDLY_NAME,
     ATTR_UNIT_OF_MEASUREMENT,
+    PERCENTAGE,
+    STATE_UNAVAILABLE,
     STATE_UNKNOWN,
-    UNIT_PERCENTAGE,
 )
+from homeassistant.helpers import device_registry as dr, entity_registry as er
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 
 from .conftest import setup_platform
@@ -38,7 +41,7 @@ async def test_entity_state(hass, device_factory):
     await setup_platform(hass, SENSOR_DOMAIN, devices=[device])
     state = hass.states.get("sensor.sensor_1_battery")
     assert state.state == "100"
-    assert state.attributes[ATTR_UNIT_OF_MEASUREMENT] == UNIT_PERCENTAGE
+    assert state.attributes[ATTR_UNIT_OF_MEASUREMENT] == PERCENTAGE
     assert state.attributes[ATTR_FRIENDLY_NAME] == f"{device.label} Battery"
 
 
@@ -77,15 +80,15 @@ async def test_entity_and_device_attributes(hass, device_factory):
     """Test the attributes of the entity are correct."""
     # Arrange
     device = device_factory("Sensor 1", [Capability.battery], {Attribute.battery: 100})
-    entity_registry = await hass.helpers.entity_registry.async_get_registry()
-    device_registry = await hass.helpers.device_registry.async_get_registry()
+    entity_registry = er.async_get(hass)
+    device_registry = dr.async_get(hass)
     # Act
     await setup_platform(hass, SENSOR_DOMAIN, devices=[device])
     # Assert
     entry = entity_registry.async_get("sensor.sensor_1_battery")
     assert entry
     assert entry.unique_id == f"{device.device_id}.{Attribute.battery}"
-    entry = device_registry.async_get_device({(DOMAIN, device.device_id)}, [])
+    entry = device_registry.async_get_device({(DOMAIN, device.device_id)})
     assert entry
     assert entry.name == device.label
     assert entry.model == device.device_type_name
@@ -114,7 +117,8 @@ async def test_unload_config_entry(hass, device_factory):
     # Arrange
     device = device_factory("Sensor 1", [Capability.battery], {Attribute.battery: 100})
     config_entry = await setup_platform(hass, SENSOR_DOMAIN, devices=[device])
+    config_entry.state = ConfigEntryState.LOADED
     # Act
     await hass.config_entries.async_forward_entry_unload(config_entry, "sensor")
     # Assert
-    assert not hass.states.get("sensor.sensor_1_battery")
+    assert hass.states.get("sensor.sensor_1_battery").state == STATE_UNAVAILABLE

@@ -1,6 +1,5 @@
 """Support for ESPHome climate devices."""
-import logging
-from typing import List, Optional
+from __future__ import annotations
 
 from aioesphomeapi import (
     ClimateAction,
@@ -59,12 +58,10 @@ from homeassistant.const import (
 
 from . import (
     EsphomeEntity,
-    esphome_map_enum,
+    EsphomeEnumMapper,
     esphome_state_property,
     platform_async_setup_entry,
 )
-
-_LOGGER = logging.getLogger(__name__)
 
 
 async def async_setup_entry(hass, entry, async_add_entities):
@@ -80,9 +77,8 @@ async def async_setup_entry(hass, entry, async_add_entities):
     )
 
 
-@esphome_map_enum
-def _climate_modes():
-    return {
+_CLIMATE_MODES: EsphomeEnumMapper[ClimateMode] = EsphomeEnumMapper(
+    {
         ClimateMode.OFF: HVAC_MODE_OFF,
         ClimateMode.AUTO: HVAC_MODE_HEAT_COOL,
         ClimateMode.COOL: HVAC_MODE_COOL,
@@ -90,11 +86,9 @@ def _climate_modes():
         ClimateMode.FAN_ONLY: HVAC_MODE_FAN_ONLY,
         ClimateMode.DRY: HVAC_MODE_DRY,
     }
-
-
-@esphome_map_enum
-def _climate_actions():
-    return {
+)
+_CLIMATE_ACTIONS: EsphomeEnumMapper[ClimateAction] = EsphomeEnumMapper(
+    {
         ClimateAction.OFF: CURRENT_HVAC_OFF,
         ClimateAction.COOLING: CURRENT_HVAC_COOL,
         ClimateAction.HEATING: CURRENT_HVAC_HEAT,
@@ -102,11 +96,9 @@ def _climate_actions():
         ClimateAction.DRYING: CURRENT_HVAC_DRY,
         ClimateAction.FAN: CURRENT_HVAC_FAN,
     }
-
-
-@esphome_map_enum
-def _fan_modes():
-    return {
+)
+_FAN_MODES: EsphomeEnumMapper[ClimateFanMode] = EsphomeEnumMapper(
+    {
         ClimateFanMode.ON: FAN_ON,
         ClimateFanMode.OFF: FAN_OFF,
         ClimateFanMode.AUTO: FAN_AUTO,
@@ -117,16 +109,15 @@ def _fan_modes():
         ClimateFanMode.FOCUS: FAN_FOCUS,
         ClimateFanMode.DIFFUSE: FAN_DIFFUSE,
     }
-
-
-@esphome_map_enum
-def _swing_modes():
-    return {
+)
+_SWING_MODES: EsphomeEnumMapper[ClimateSwingMode] = EsphomeEnumMapper(
+    {
         ClimateSwingMode.OFF: SWING_OFF,
         ClimateSwingMode.BOTH: SWING_BOTH,
         ClimateSwingMode.VERTICAL: SWING_VERTICAL,
         ClimateSwingMode.HORIZONTAL: SWING_HORIZONTAL,
     }
+)
 
 
 class EsphomeClimateEntity(EsphomeEntity, ClimateEntity):
@@ -137,7 +128,7 @@ class EsphomeClimateEntity(EsphomeEntity, ClimateEntity):
         return super()._static_info
 
     @property
-    def _state(self) -> Optional[ClimateState]:
+    def _state(self) -> ClimateState | None:
         return super()._state
 
     @property
@@ -156,10 +147,10 @@ class EsphomeClimateEntity(EsphomeEntity, ClimateEntity):
         return TEMP_CELSIUS
 
     @property
-    def hvac_modes(self) -> List[str]:
+    def hvac_modes(self) -> list[str]:
         """Return the list of available operation modes."""
         return [
-            _climate_modes.from_esphome(mode)
+            _CLIMATE_MODES.from_esphome(mode)
             for mode in self._static_info.supported_modes
         ]
 
@@ -167,7 +158,7 @@ class EsphomeClimateEntity(EsphomeEntity, ClimateEntity):
     def fan_modes(self):
         """Return the list of available fan modes."""
         return [
-            _fan_modes.from_esphome(mode)
+            _FAN_MODES.from_esphome(mode)
             for mode in self._static_info.supported_fan_modes
         ]
 
@@ -180,7 +171,7 @@ class EsphomeClimateEntity(EsphomeEntity, ClimateEntity):
     def swing_modes(self):
         """Return the list of available swing modes."""
         return [
-            _swing_modes.from_esphome(mode)
+            _SWING_MODES.from_esphome(mode)
             for mode in self._static_info.supported_swing_modes
         ]
 
@@ -220,22 +211,22 @@ class EsphomeClimateEntity(EsphomeEntity, ClimateEntity):
     # pylint: disable=invalid-overridden-method
 
     @esphome_state_property
-    def hvac_mode(self) -> Optional[str]:
+    def hvac_mode(self) -> str | None:
         """Return current operation ie. heat, cool, idle."""
-        return _climate_modes.from_esphome(self._state.mode)
+        return _CLIMATE_MODES.from_esphome(self._state.mode)
 
     @esphome_state_property
-    def hvac_action(self) -> Optional[str]:
+    def hvac_action(self) -> str | None:
         """Return current action."""
         # HA has no support feature field for hvac_action
         if not self._static_info.supports_action:
             return None
-        return _climate_actions.from_esphome(self._state.action)
+        return _CLIMATE_ACTIONS.from_esphome(self._state.action)
 
     @esphome_state_property
-    def fan_mode(self):
+    def fan_mode(self) -> str | None:
         """Return current fan setting."""
-        return _fan_modes.from_esphome(self._state.fan_mode)
+        return _FAN_MODES.from_esphome(self._state.fan_mode)
 
     @esphome_state_property
     def preset_mode(self):
@@ -243,27 +234,27 @@ class EsphomeClimateEntity(EsphomeEntity, ClimateEntity):
         return PRESET_AWAY if self._state.away else PRESET_HOME
 
     @esphome_state_property
-    def swing_mode(self):
+    def swing_mode(self) -> str | None:
         """Return current swing mode."""
-        return _swing_modes.from_esphome(self._state.swing_mode)
+        return _SWING_MODES.from_esphome(self._state.swing_mode)
 
     @esphome_state_property
-    def current_temperature(self) -> Optional[float]:
+    def current_temperature(self) -> float | None:
         """Return the current temperature."""
         return self._state.current_temperature
 
     @esphome_state_property
-    def target_temperature(self) -> Optional[float]:
+    def target_temperature(self) -> float | None:
         """Return the temperature we try to reach."""
         return self._state.target_temperature
 
     @esphome_state_property
-    def target_temperature_low(self) -> Optional[float]:
+    def target_temperature_low(self) -> float | None:
         """Return the lowbound target temperature we try to reach."""
         return self._state.target_temperature_low
 
     @esphome_state_property
-    def target_temperature_high(self) -> Optional[float]:
+    def target_temperature_high(self) -> float | None:
         """Return the highbound target temperature we try to reach."""
         return self._state.target_temperature_high
 
@@ -271,7 +262,7 @@ class EsphomeClimateEntity(EsphomeEntity, ClimateEntity):
         """Set new target temperature (and operation mode if set)."""
         data = {"key": self._static_info.key}
         if ATTR_HVAC_MODE in kwargs:
-            data["mode"] = _climate_modes.from_hass(kwargs[ATTR_HVAC_MODE])
+            data["mode"] = _CLIMATE_MODES.from_hass(kwargs[ATTR_HVAC_MODE])
         if ATTR_TEMPERATURE in kwargs:
             data["target_temperature"] = kwargs[ATTR_TEMPERATURE]
         if ATTR_TARGET_TEMP_LOW in kwargs:
@@ -283,7 +274,7 @@ class EsphomeClimateEntity(EsphomeEntity, ClimateEntity):
     async def async_set_hvac_mode(self, hvac_mode: str) -> None:
         """Set new target operation mode."""
         await self._client.climate_command(
-            key=self._static_info.key, mode=_climate_modes.from_hass(hvac_mode)
+            key=self._static_info.key, mode=_CLIMATE_MODES.from_hass(hvac_mode)
         )
 
     async def async_set_preset_mode(self, preset_mode):
@@ -294,11 +285,11 @@ class EsphomeClimateEntity(EsphomeEntity, ClimateEntity):
     async def async_set_fan_mode(self, fan_mode: str) -> None:
         """Set new fan mode."""
         await self._client.climate_command(
-            key=self._static_info.key, fan_mode=_fan_modes.from_hass(fan_mode)
+            key=self._static_info.key, fan_mode=_FAN_MODES.from_hass(fan_mode)
         )
 
     async def async_set_swing_mode(self, swing_mode: str) -> None:
         """Set new swing mode."""
         await self._client.climate_command(
-            key=self._static_info.key, swing_mode=_swing_modes.from_hass(swing_mode)
+            key=self._static_info.key, swing_mode=_SWING_MODES.from_hass(swing_mode)
         )

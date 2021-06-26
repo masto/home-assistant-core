@@ -1,16 +1,18 @@
 """Support for WUnderground weather service."""
+from __future__ import annotations
+
 import asyncio
 from datetime import timedelta
 import logging
 import re
-from typing import Any, Callable, Optional, Union
+from typing import Any, Callable
 
 import aiohttp
 import async_timeout
 import voluptuous as vol
 
 from homeassistant.components import sensor
-from homeassistant.components.sensor import PLATFORM_SCHEMA
+from homeassistant.components.sensor import PLATFORM_SCHEMA, SensorEntity
 from homeassistant.const import (
     ATTR_ATTRIBUTION,
     CONF_API_KEY,
@@ -23,17 +25,19 @@ from homeassistant.const import (
     LENGTH_INCHES,
     LENGTH_KILOMETERS,
     LENGTH_MILES,
+    LENGTH_MILLIMETERS,
+    PERCENTAGE,
+    PRESSURE_INHG,
     SPEED_KILOMETERS_PER_HOUR,
     SPEED_MILES_PER_HOUR,
     TEMP_CELSIUS,
     TEMP_FAHRENHEIT,
-    UNIT_PERCENTAGE,
 )
+from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import PlatformNotReady
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 import homeassistant.helpers.config_validation as cv
-from homeassistant.helpers.entity import Entity
-from homeassistant.helpers.typing import ConfigType, HomeAssistantType
+from homeassistant.helpers.typing import ConfigType
 from homeassistant.util import Throttle
 
 _RESOURCE = "http://api.wunderground.com/api/{}/{}/{}/q/"
@@ -62,15 +66,15 @@ class WUSensorConfig:
 
     def __init__(
         self,
-        friendly_name: Union[str, Callable],
+        friendly_name: str | Callable,
         feature: str,
-        value: Callable[["WUndergroundData"], Any],
-        unit_of_measurement: Optional[str] = None,
+        value: Callable[[WUndergroundData], Any],
+        unit_of_measurement: str | None = None,
         entity_picture=None,
         icon: str = "mdi:gauge",
-        device_state_attributes=None,
+        extra_state_attributes=None,
         device_class=None,
-    ):
+    ) -> None:
         """Initialize sensor configuration.
 
         :param friendly_name: Friendly name
@@ -80,7 +84,7 @@ class WUSensorConfig:
         :param unit_of_measurement: unit of measurement
         :param entity_picture: value or callback returning URL of entity picture
         :param icon: icon name or URL
-        :param device_state_attributes: dictionary of attributes, or callable that returns it
+        :param extra_state_attributes: dictionary of attributes, or callable that returns it
         """
         self.friendly_name = friendly_name
         self.unit_of_measurement = unit_of_measurement
@@ -88,7 +92,7 @@ class WUSensorConfig:
         self.value = value
         self.entity_picture = entity_picture
         self.icon = icon
-        self.device_state_attributes = device_state_attributes or {}
+        self.extra_state_attributes = extra_state_attributes or {}
         self.device_class = device_class
 
 
@@ -97,12 +101,12 @@ class WUCurrentConditionsSensorConfig(WUSensorConfig):
 
     def __init__(
         self,
-        friendly_name: Union[str, Callable],
+        friendly_name: str | Callable,
         field: str,
-        icon: Optional[str] = "mdi:gauge",
-        unit_of_measurement: Optional[str] = None,
+        icon: str | None = "mdi:gauge",
+        unit_of_measurement: str | None = None,
         device_class=None,
-    ):
+    ) -> None:
         """Initialize current conditions sensor configuration.
 
         :param friendly_name: Friendly name of sensor
@@ -119,7 +123,7 @@ class WUCurrentConditionsSensorConfig(WUSensorConfig):
             entity_picture=lambda wu: wu.data["current_observation"]["icon_url"]
             if icon is None
             else None,
-            device_state_attributes={
+            extra_state_attributes={
                 "date": lambda wu: wu.data["current_observation"]["observation_time"]
             },
             device_class=device_class,
@@ -130,8 +134,8 @@ class WUDailyTextForecastSensorConfig(WUSensorConfig):
     """Helper for defining sensor configurations for daily text forecasts."""
 
     def __init__(
-        self, period: int, field: str, unit_of_measurement: Optional[str] = None
-    ):
+        self, period: int, field: str, unit_of_measurement: str | None = None
+    ) -> None:
         """Initialize daily text forecast sensor configuration.
 
         :param period: forecast period number
@@ -150,7 +154,7 @@ class WUDailyTextForecastSensorConfig(WUSensorConfig):
                 "forecastday"
             ][period]["icon_url"],
             unit_of_measurement=unit_of_measurement,
-            device_state_attributes={
+            extra_state_attributes={
                 "date": lambda wu: wu.data["forecast"]["txt_forecast"]["date"]
             },
         )
@@ -164,11 +168,11 @@ class WUDailySimpleForecastSensorConfig(WUSensorConfig):
         friendly_name: str,
         period: int,
         field: str,
-        wu_unit: Optional[str] = None,
-        ha_unit: Optional[str] = None,
+        wu_unit: str | None = None,
+        ha_unit: str | None = None,
         icon=None,
         device_class=None,
-    ):
+    ) -> None:
         """Initialize daily simple forecast sensor configuration.
 
         :param friendly_name: friendly_name of the sensor
@@ -199,7 +203,7 @@ class WUDailySimpleForecastSensorConfig(WUSensorConfig):
             if not icon
             else None,
             icon=icon,
-            device_state_attributes={
+            extra_state_attributes={
                 "date": lambda wu: wu.data["forecast"]["simpleforecast"]["forecastday"][
                     period
                 ]["date"]["pretty"]
@@ -211,7 +215,7 @@ class WUDailySimpleForecastSensorConfig(WUSensorConfig):
 class WUHourlyForecastSensorConfig(WUSensorConfig):
     """Helper for defining sensor configurations for hourly text forecasts."""
 
-    def __init__(self, period: int, field: int):
+    def __init__(self, period: int, field: int) -> None:
         """Initialize hourly forecast sensor configuration.
 
         :param period: forecast period number
@@ -225,7 +229,7 @@ class WUHourlyForecastSensorConfig(WUSensorConfig):
             feature="hourly",
             value=lambda wu: wu.data["hourly_forecast"][period][field],
             entity_picture=lambda wu: wu.data["hourly_forecast"][period]["icon_url"],
-            device_state_attributes={
+            extra_state_attributes={
                 "temp_c": lambda wu: wu.data["hourly_forecast"][period]["temp"][
                     "metric"
                 ],
@@ -271,14 +275,14 @@ class WUAlmanacSensorConfig(WUSensorConfig):
 
     def __init__(
         self,
-        friendly_name: Union[str, Callable],
+        friendly_name: str | Callable,
         field: str,
         value_type: str,
         wu_unit: str,
         unit_of_measurement: str,
         icon: str,
         device_class=None,
-    ):
+    ) -> None:
         """Initialize almanac sensor configuration.
 
         :param friendly_name: Friendly name
@@ -301,7 +305,7 @@ class WUAlmanacSensorConfig(WUSensorConfig):
 class WUAlertsSensorConfig(WUSensorConfig):
     """Helper for defining field configuration for alerts."""
 
-    def __init__(self, friendly_name: Union[str, Callable]):
+    def __init__(self, friendly_name: str | Callable) -> None:
         """Initialiize alerts sensor configuration.
 
         :param friendly_name: Friendly name
@@ -313,7 +317,7 @@ class WUAlertsSensorConfig(WUSensorConfig):
             icon=lambda wu: "mdi:alert-circle-outline"
             if wu.data["alerts"]
             else "mdi:check-circle-outline",
-            device_state_attributes=self._get_attributes,
+            extra_state_attributes=self._get_attributes,
         )
 
     @staticmethod
@@ -391,7 +395,7 @@ SENSOR_TYPES = {
         "Precipitation 1hr", "precip_1hr_in", "mdi:umbrella", LENGTH_INCHES
     ),
     "precip_1hr_metric": WUCurrentConditionsSensorConfig(
-        "Precipitation 1hr", "precip_1hr_metric", "mdi:umbrella", "mm"
+        "Precipitation 1hr", "precip_1hr_metric", "mdi:umbrella", LENGTH_MILLIMETERS
     ),
     "precip_1hr_string": WUCurrentConditionsSensorConfig(
         "Precipitation 1hr", "precip_1hr_string", "mdi:umbrella"
@@ -400,13 +404,13 @@ SENSOR_TYPES = {
         "Precipitation Today", "precip_today_in", "mdi:umbrella", LENGTH_INCHES
     ),
     "precip_today_metric": WUCurrentConditionsSensorConfig(
-        "Precipitation Today", "precip_today_metric", "mdi:umbrella", "mm"
+        "Precipitation Today", "precip_today_metric", "mdi:umbrella", LENGTH_MILLIMETERS
     ),
     "precip_today_string": WUCurrentConditionsSensorConfig(
         "Precipitation Today", "precip_today_string", "mdi:umbrella"
     ),
     "pressure_in": WUCurrentConditionsSensorConfig(
-        "Pressure", "pressure_in", "mdi:gauge", "inHg", device_class="pressure"
+        "Pressure", "pressure_in", "mdi:gauge", PRESSURE_INHG, device_class="pressure"
     ),
     "pressure_mb": WUCurrentConditionsSensorConfig(
         "Pressure", "pressure_mb", "mdi:gauge", "mb", device_class="pressure"
@@ -418,7 +422,7 @@ SENSOR_TYPES = {
         "Relative Humidity",
         "conditions",
         value=lambda wu: int(wu.data["current_observation"]["relative_humidity"][:-1]),
-        unit_of_measurement=UNIT_PERCENTAGE,
+        unit_of_measurement=PERCENTAGE,
         icon="mdi:water-percent",
         device_class="humidity",
     ),
@@ -878,16 +882,36 @@ SENSOR_TYPES = {
         "mdi:weather-windy",
     ),
     "precip_1d_mm": WUDailySimpleForecastSensorConfig(
-        "Precipitation Intensity Today", 0, "qpf_allday", "mm", "mm", "mdi:umbrella"
+        "Precipitation Intensity Today",
+        0,
+        "qpf_allday",
+        LENGTH_MILLIMETERS,
+        LENGTH_MILLIMETERS,
+        "mdi:umbrella",
     ),
     "precip_2d_mm": WUDailySimpleForecastSensorConfig(
-        "Precipitation Intensity Tomorrow", 1, "qpf_allday", "mm", "mm", "mdi:umbrella"
+        "Precipitation Intensity Tomorrow",
+        1,
+        "qpf_allday",
+        LENGTH_MILLIMETERS,
+        LENGTH_MILLIMETERS,
+        "mdi:umbrella",
     ),
     "precip_3d_mm": WUDailySimpleForecastSensorConfig(
-        "Precipitation Intensity in 3 Days", 2, "qpf_allday", "mm", "mm", "mdi:umbrella"
+        "Precipitation Intensity in 3 Days",
+        2,
+        "qpf_allday",
+        LENGTH_MILLIMETERS,
+        LENGTH_MILLIMETERS,
+        "mdi:umbrella",
     ),
     "precip_4d_mm": WUDailySimpleForecastSensorConfig(
-        "Precipitation Intensity in 4 Days", 3, "qpf_allday", "mm", "mm", "mdi:umbrella"
+        "Precipitation Intensity in 4 Days",
+        3,
+        "qpf_allday",
+        LENGTH_MILLIMETERS,
+        LENGTH_MILLIMETERS,
+        "mdi:umbrella",
     ),
     "precip_1d_in": WUDailySimpleForecastSensorConfig(
         "Precipitation Intensity Today",
@@ -926,7 +950,7 @@ SENSOR_TYPES = {
         0,
         "pop",
         None,
-        UNIT_PERCENTAGE,
+        PERCENTAGE,
         "mdi:umbrella",
     ),
     "precip_2d": WUDailySimpleForecastSensorConfig(
@@ -934,7 +958,7 @@ SENSOR_TYPES = {
         1,
         "pop",
         None,
-        UNIT_PERCENTAGE,
+        PERCENTAGE,
         "mdi:umbrella",
     ),
     "precip_3d": WUDailySimpleForecastSensorConfig(
@@ -942,7 +966,7 @@ SENSOR_TYPES = {
         2,
         "pop",
         None,
-        UNIT_PERCENTAGE,
+        PERCENTAGE,
         "mdi:umbrella",
     ),
     "precip_4d": WUDailySimpleForecastSensorConfig(
@@ -950,7 +974,7 @@ SENSOR_TYPES = {
         3,
         "pop",
         None,
-        UNIT_PERCENTAGE,
+        PERCENTAGE,
         "mdi:umbrella",
     ),
 }
@@ -1063,7 +1087,7 @@ PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend(
 
 
 async def async_setup_platform(
-    hass: HomeAssistantType, config: ConfigType, async_add_entities, discovery_info=None
+    hass: HomeAssistant, config: ConfigType, async_add_entities, discovery_info=None
 ):
     """Set up the WUnderground sensor."""
     latitude = config.get(CONF_LATITUDE, hass.config.latitude)
@@ -1095,10 +1119,12 @@ async def async_setup_platform(
     async_add_entities(sensors, True)
 
 
-class WUndergroundSensor(Entity):
+class WUndergroundSensor(SensorEntity):
     """Implementing the WUnderground sensor."""
 
-    def __init__(self, hass: HomeAssistantType, rest, condition, unique_id_base: str):
+    def __init__(
+        self, hass: HomeAssistant, rest, condition, unique_id_base: str
+    ) -> None:
         """Initialize the sensor."""
         self.rest = rest
         self._condition = condition
@@ -1135,7 +1161,7 @@ class WUndergroundSensor(Entity):
 
     def _update_attrs(self):
         """Parse and update device state attributes."""
-        attrs = self._cfg_expand("device_state_attributes", {})
+        attrs = self._cfg_expand("extra_state_attributes", {})
 
         for (attr, callback) in attrs.items():
             if callable(callback):
@@ -1163,7 +1189,7 @@ class WUndergroundSensor(Entity):
         return self._state
 
     @property
-    def device_state_attributes(self):
+    def extra_state_attributes(self):
         """Return the state attributes."""
         return self._attributes
 

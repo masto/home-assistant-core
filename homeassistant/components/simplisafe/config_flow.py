@@ -8,31 +8,30 @@ from simplipy.errors import (
 import voluptuous as vol
 
 from homeassistant import config_entries
-from homeassistant.const import CONF_CODE, CONF_PASSWORD, CONF_TOKEN, CONF_USERNAME
+from homeassistant.const import CONF_CODE, CONF_PASSWORD, CONF_USERNAME
 from homeassistant.core import callback
 from homeassistant.helpers import aiohttp_client
 
 from . import async_get_client_id
-from .const import DOMAIN, LOGGER  # pylint: disable=unused-import
+from .const import DOMAIN, LOGGER
+
+FULL_DATA_SCHEMA = vol.Schema(
+    {
+        vol.Required(CONF_USERNAME): str,
+        vol.Required(CONF_PASSWORD): str,
+        vol.Optional(CONF_CODE): str,
+    }
+)
+PASSWORD_DATA_SCHEMA = vol.Schema({vol.Required(CONF_PASSWORD): str})
 
 
 class SimpliSafeFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a SimpliSafe config flow."""
 
     VERSION = 1
-    CONNECTION_CLASS = config_entries.CONN_CLASS_CLOUD_POLL
 
     def __init__(self):
         """Initialize the config flow."""
-        self.full_data_schema = vol.Schema(
-            {
-                vol.Required(CONF_USERNAME): str,
-                vol.Required(CONF_PASSWORD): str,
-                vol.Optional(CONF_CODE): str,
-            }
-        )
-        self.password_data_schema = vol.Schema({vol.Required(CONF_PASSWORD): str})
-
         self._code = None
         self._password = None
         self._username = None
@@ -49,7 +48,10 @@ class SimpliSafeFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         websession = aiohttp_client.async_get_clientsession(self.hass)
 
         return await API.login_via_credentials(
-            self._username, self._password, client_id=client_id, session=websession,
+            self._username,
+            self._password,
+            client_id=client_id,
+            session=websession,
         )
 
     async def _async_login_during_step(self, *, step_id, form_schema):
@@ -57,25 +59,27 @@ class SimpliSafeFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         errors = {}
 
         try:
-            simplisafe = await self._async_get_simplisafe_api()
+            await self._async_get_simplisafe_api()
         except PendingAuthorizationError:
             LOGGER.info("Awaiting confirmation of MFA email click")
             return await self.async_step_mfa()
         except InvalidCredentialsError:
-            errors = {"base": "invalid_credentials"}
+            errors = {"base": "invalid_auth"}
         except SimplipyError as err:
             LOGGER.error("Unknown error while logging into SimpliSafe: %s", err)
             errors = {"base": "unknown"}
 
         if errors:
             return self.async_show_form(
-                step_id=step_id, data_schema=form_schema, errors=errors,
+                step_id=step_id,
+                data_schema=form_schema,
+                errors=errors,
             )
 
         return await self.async_step_finish(
             {
                 CONF_USERNAME: self._username,
-                CONF_TOKEN: simplisafe.refresh_token,
+                CONF_PASSWORD: self._password,
                 CONF_CODE: self._code,
             }
         )
@@ -85,12 +89,11 @@ class SimpliSafeFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         existing_entry = await self.async_set_unique_id(self._username)
         if existing_entry:
             self.hass.config_entries.async_update_entry(existing_entry, data=user_input)
+            self.hass.async_create_task(
+                self.hass.config_entries.async_reload(existing_entry.entry_id)
+            )
             return self.async_abort(reason="reauth_successful")
         return self.async_create_entry(title=self._username, data=user_input)
-
-    async def async_step_import(self, import_config):
-        """Import a config entry from configuration.yaml."""
-        return await self.async_step_user(import_config)
 
     async def async_step_mfa(self, user_input=None):
         """Handle multi-factor auth confirmation."""
@@ -98,7 +101,7 @@ class SimpliSafeFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
             return self.async_show_form(step_id="mfa")
 
         try:
-            simplisafe = await self._async_get_simplisafe_api()
+            await self._async_get_simplisafe_api()
         except PendingAuthorizationError:
             LOGGER.error("Still awaiting confirmation of MFA email click")
             return self.async_show_form(
@@ -108,7 +111,7 @@ class SimpliSafeFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         return await self.async_step_finish(
             {
                 CONF_USERNAME: self._username,
-                CONF_TOKEN: simplisafe.refresh_token,
+                CONF_PASSWORD: self._password,
                 CONF_CODE: self._code,
             }
         )
@@ -124,21 +127,19 @@ class SimpliSafeFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         """Handle re-auth completion."""
         if not user_input:
             return self.async_show_form(
-                step_id="reauth_confirm", data_schema=self.password_data_schema
+                step_id="reauth_confirm", data_schema=PASSWORD_DATA_SCHEMA
             )
 
         self._password = user_input[CONF_PASSWORD]
 
         return await self._async_login_during_step(
-            step_id="reauth_confirm", form_schema=self.password_data_schema
+            step_id="reauth_confirm", form_schema=PASSWORD_DATA_SCHEMA
         )
 
     async def async_step_user(self, user_input=None):
         """Handle the start of the config flow."""
         if not user_input:
-            return self.async_show_form(
-                step_id="user", data_schema=self.full_data_schema
-            )
+            return self.async_show_form(step_id="user", data_schema=FULL_DATA_SCHEMA)
 
         await self.async_set_unique_id(user_input[CONF_USERNAME])
         self._abort_if_unique_id_configured()
@@ -148,7 +149,7 @@ class SimpliSafeFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         self._username = user_input[CONF_USERNAME]
 
         return await self._async_login_during_step(
-            step_id="user", form_schema=self.full_data_schema
+            step_id="user", form_schema=FULL_DATA_SCHEMA
         )
 
 
@@ -169,7 +170,10 @@ class SimpliSafeOptionsFlowHandler(config_entries.OptionsFlow):
             data_schema=vol.Schema(
                 {
                     vol.Optional(
-                        CONF_CODE, default=self.config_entry.options.get(CONF_CODE),
+                        CONF_CODE,
+                        description={
+                            "suggested_value": self.config_entry.options.get(CONF_CODE)
+                        },
                     ): str
                 }
             ),

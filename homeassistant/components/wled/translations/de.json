@@ -2,12 +2,12 @@
     "config": {
         "abort": {
             "already_configured": "Dieses WLED-Ger\u00e4t ist bereits konfiguriert.",
-            "connection_error": "Verbindung zum WLED-Ger\u00e4t fehlgeschlagen."
+            "cannot_connect": "Verbindung fehlgeschlagen"
         },
         "error": {
-            "connection_error": "Verbindung zum WLED-Ger\u00e4t fehlgeschlagen."
+            "cannot_connect": "Verbindung fehlgeschlagen"
         },
-        "flow_title": "WLED: {name}",
+        "flow_title": "{name}",
         "step": {
             "user": {
                 "data": {
@@ -18,6 +18,15 @@
             "zeroconf_confirm": {
                 "description": "M\u00f6chten Sie die WLED mit dem Namen `{name}` zu Home Assistant hinzuf\u00fcgen?",
                 "title": "WLED-Ger\u00e4t entdeckt"
+            }
+        }
+    },
+    "options": {
+        "step": {
+            "init": {
+                "data": {
+                    "keep_master_light": "Master-Licht beibehalten, auch mit 1 LED-Segment."
+                }
             }
         }
     }
