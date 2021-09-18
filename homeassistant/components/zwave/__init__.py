@@ -39,7 +39,7 @@ import homeassistant.util.dt as dt_util
 
 from homeassistant.exceptions import ConfigEntryNotReady
 
-from . import config_flow, const, websocket_api as wsapi, workaround
+from . import const, websocket_api as wsapi, workaround
 from .const import (
     CONF_AUTOHEAL,
     CONF_CONFIG_PATH,
