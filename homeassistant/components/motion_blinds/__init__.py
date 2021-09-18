@@ -3,8 +3,7 @@ from datetime import timedelta
 import logging
 from socket import timeout
 
-from motionblinds import MotionMulticast
-from motionblinds.motion_blinds import ParseException
+from motionblinds import MotionMulticast, ParseException
 
 from homeassistant import config_entries, core
 from homeassistant.const import CONF_API_KEY, CONF_HOST, EVENT_HOMEASSISTANT_STOP
@@ -40,7 +39,7 @@ class DataUpdateCoordinatorMotionBlinds(DataUpdateCoordinator):
         name,
         update_interval=None,
         update_method=None,
-    ):
+    ) -> None:
         """Initialize global data updater."""
         super().__init__(
             hass,
@@ -80,23 +79,13 @@ class DataUpdateCoordinatorMotionBlinds(DataUpdateCoordinator):
         """Fetch the latest data from the gateway and blinds."""
         data = await self.hass.async_add_executor_job(self.update_gateway)
 
-        all_available = True
-        for device in data.values():
-            if not device[ATTR_AVAILABLE]:
-                all_available = False
-                break
-
+        all_available = all(device[ATTR_AVAILABLE] for device in data.values())
         if all_available:
             self.update_interval = timedelta(seconds=UPDATE_INTERVAL)
         else:
             self.update_interval = timedelta(seconds=UPDATE_INTERVAL_FAST)
 
         return data
-
-
-def setup(hass: core.HomeAssistant, config: dict):
-    """Set up the Motion Blinds component."""
-    return True
 
 
 async def async_setup_entry(
@@ -147,6 +136,11 @@ async def async_setup_entry(
         KEY_COORDINATOR: coordinator,
     }
 
+    if motion_gateway.firmware is not None:
+        version = f"{motion_gateway.firmware}, protocol: {motion_gateway.protocol}"
+    else:
+        version = f"Protocol: {motion_gateway.protocol}"
+
     device_registry = await dr.async_get_registry(hass)
     device_registry.async_get_or_create(
         config_entry_id=entry.entry_id,
@@ -155,7 +149,7 @@ async def async_setup_entry(
         manufacturer=MANUFACTURER,
         name=entry.title,
         model="Wi-Fi bridge",
-        sw_version=motion_gateway.protocol,
+        sw_version=version,
     )
 
     hass.config_entries.async_setup_platforms(entry, PLATFORMS)

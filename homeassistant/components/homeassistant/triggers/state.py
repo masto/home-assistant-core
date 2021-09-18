@@ -87,10 +87,8 @@ async def async_attach_trigger(
     attribute = config.get(CONF_ATTRIBUTE)
     job = HassJob(action)
 
-    trigger_data = automation_info.get("trigger_data", {}) if automation_info else {}
-    _variables = {}
-    if automation_info:
-        _variables = automation_info.get("variables") or {}
+    trigger_data = automation_info["trigger_data"]
+    _variables = automation_info["variables"] or {}
 
     @callback
     def state_automation_listener(event: Event):
@@ -171,10 +169,11 @@ async def async_attach_trigger(
             )
             return
 
-        def _check_same_state(_, _2, new_st: State):
+        def _check_same_state(_, _2, new_st: State | None) -> bool:
             if new_st is None:
                 return False
 
+            cur_value: str | None
             if attribute is None:
                 cur_value = new_st.state
             else:

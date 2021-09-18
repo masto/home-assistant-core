@@ -18,6 +18,7 @@ from homeassistant.components.weather import (
     ATTR_FORECAST_WIND_BEARING,
     ATTR_FORECAST_WIND_SPEED,
 )
+from homeassistant.const import TEMP_CELSIUS
 from homeassistant.helpers import sun
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt
@@ -82,9 +83,9 @@ class WeatherUpdateCoordinator(DataUpdateCoordinator):
 
     async def _get_owm_weather(self):
         """Poll weather data from OWM."""
-        if (
-            self._forecast_mode == FORECAST_MODE_ONECALL_HOURLY
-            or self._forecast_mode == FORECAST_MODE_ONECALL_DAILY
+        if self._forecast_mode in (
+            FORECAST_MODE_ONECALL_HOURLY,
+            FORECAST_MODE_ONECALL_DAILY,
         ):
             weather = await self.hass.async_add_executor_job(
                 self._owm_client.one_call, self._latitude, self._longitude
@@ -179,10 +180,10 @@ class WeatherUpdateCoordinator(DataUpdateCoordinator):
 
         return forecast
 
-    @staticmethod
-    def _fmt_dewpoint(dewpoint):
+    def _fmt_dewpoint(self, dewpoint):
         if dewpoint is not None:
-            return round(dewpoint / 100, 1)
+            dewpoint = dewpoint - 273.15
+            return round(self.hass.config.units.temperature(dewpoint, TEMP_CELSIUS), 1)
         return None
 
     @staticmethod
@@ -190,6 +191,8 @@ class WeatherUpdateCoordinator(DataUpdateCoordinator):
         """Get rain data from weather data."""
         if "all" in rain:
             return round(rain["all"], 2)
+        if "3h" in rain:
+            return round(rain["3h"], 2)
         if "1h" in rain:
             return round(rain["1h"], 2)
         return 0
@@ -200,6 +203,8 @@ class WeatherUpdateCoordinator(DataUpdateCoordinator):
         if snow:
             if "all" in snow:
                 return round(snow["all"], 2)
+            if "3h" in snow:
+                return round(snow["3h"], 2)
             if "1h" in snow:
                 return round(snow["1h"], 2)
         return 0

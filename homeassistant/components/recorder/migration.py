@@ -1,4 +1,5 @@
 """Schema migration helpers."""
+import contextlib
 import logging
 
 import sqlalchemy
@@ -11,7 +12,16 @@ from sqlalchemy.exc import (
 )
 from sqlalchemy.schema import AddConstraint, DropConstraint
 
-from .models import SCHEMA_VERSION, TABLE_STATES, Base, SchemaChanges, Statistics
+from .models import (
+    SCHEMA_VERSION,
+    TABLE_STATES,
+    Base,
+    SchemaChanges,
+    Statistics,
+    StatisticsMeta,
+    StatisticsRuns,
+)
+from .statistics import get_start_time
 from .util import session_scope
 
 _LOGGER = logging.getLogger(__name__)
@@ -297,7 +307,7 @@ def _update_states_table_with_foreign_key_options(connection, engine):
 
     states_key_constraints = Base.metadata.tables[TABLE_STATES].foreign_key_constraints
     old_states_table = Table(  # noqa: F841 pylint: disable=unused-variable
-        TABLE_STATES, MetaData(), *[alter["old_fk"] for alter in alters]
+        TABLE_STATES, MetaData(), *(alter["old_fk"] for alter in alters)
     )
 
     for alter in alters:
@@ -340,7 +350,7 @@ def _drop_foreign_key_constraints(connection, engine, table, columns):
             )
 
 
-def _apply_update(engine, session, new_version, old_version):
+def _apply_update(engine, session, new_version, old_version):  # noqa: C901
     """Perform operations to bring schema up to date."""
     connection = session.connection()
     if new_version == 1:
@@ -444,14 +454,65 @@ def _apply_update(engine, session, new_version, old_version):
     elif new_version == 14:
         _modify_columns(connection, engine, "events", ["event_type VARCHAR(64)"])
     elif new_version == 15:
-        if sqlalchemy.inspect(engine).has_table(Statistics.__tablename__):
-            # Recreate the statistics table
-            Statistics.__table__.drop(engine)
-            Statistics.__table__.create(engine)
+        # This dropped the statistics table, done again in version 18.
+        pass
     elif new_version == 16:
         _drop_foreign_key_constraints(
             connection, engine, TABLE_STATES, ["old_state_id"]
         )
+    elif new_version == 17:
+        # This dropped the statistics table, done again in version 18.
+        pass
+    elif new_version == 18:
+        # Recreate the statistics and statistics meta tables.
+        #
+        # Order matters! Statistics has a relation with StatisticsMeta,
+        # so statistics need to be deleted before meta (or in pair depending
+        # on the SQL backend); and meta needs to be created before statistics.
+        if sqlalchemy.inspect(engine).has_table(
+            StatisticsMeta.__tablename__
+        ) or sqlalchemy.inspect(engine).has_table(Statistics.__tablename__):
+            Base.metadata.drop_all(
+                bind=engine, tables=[Statistics.__table__, StatisticsMeta.__table__]
+            )
+
+        StatisticsMeta.__table__.create(engine)
+        Statistics.__table__.create(engine)
+    elif new_version == 19:
+        # This adds the statistic runs table, insert a fake run to prevent duplicating
+        # statistics.
+        session.add(StatisticsRuns(start=get_start_time()))
+    elif new_version == 20:
+        # This changed the precision of statistics from float to double
+        if engine.dialect.name in ["mysql", "oracle", "postgresql"]:
+            _modify_columns(
+                connection,
+                engine,
+                "statistics",
+                [
+                    "mean DOUBLE PRECISION",
+                    "min DOUBLE PRECISION",
+                    "max DOUBLE PRECISION",
+                    "state DOUBLE PRECISION",
+                    "sum DOUBLE PRECISION",
+                ],
+            )
+    elif new_version == 21:
+        _add_columns(
+            connection,
+            "statistics",
+            ["sum_increase DOUBLE PRECISION"],
+        )
+        # Try to change the character set of the statistic_meta table
+        if engine.dialect.name == "mysql":
+            for table in ("events", "states", "statistics_meta"):
+                with contextlib.suppress(SQLAlchemyError):
+                    connection.execute(
+                        text(
+                            f"ALTER TABLE {table} CONVERT TO "
+                            "CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
+                        )
+                    )
     else:
         raise ValueError(f"No schema migration defined for version {new_version}")
 
@@ -471,6 +532,7 @@ def _inspect_schema_version(engine, session):
     for index in indexes:
         if index["column_names"] == ["time_fired"]:
             # Schema addition from version 1 detected. New DB.
+            session.add(StatisticsRuns(start=get_start_time()))
             session.add(SchemaChanges(schema_version=SCHEMA_VERSION))
             return SCHEMA_VERSION
 
