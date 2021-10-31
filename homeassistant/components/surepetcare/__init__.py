@@ -18,6 +18,7 @@ from homeassistant.const import (
     CONF_USERNAME,
 )
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.service import ServiceCall
@@ -40,7 +41,7 @@ from .const import (
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS = ["binary_sensor", "sensor"]
+PLATFORMS = ["binary_sensor", "lock", "sensor"]
 SCAN_INTERVAL = timedelta(minutes=3)
 
 CONFIG_SCHEMA = vol.Schema(
@@ -99,12 +100,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             entry,
             hass,
         )
-    except SurePetcareAuthenticationError:
+    except SurePetcareAuthenticationError as error:
         _LOGGER.error("Unable to connect to surepetcare.io: Wrong credentials!")
-        return False
+        raise ConfigEntryAuthFailed from error
     except SurePetcareError as error:
-        _LOGGER.error("Unable to connect to surepetcare.io: Wrong %s!", error)
-        return False
+        raise ConfigEntryNotReady from error
 
     await coordinator.async_config_entry_first_refresh()
 
@@ -118,7 +118,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             vol.Required(ATTR_LOCK_STATE): vol.All(
                 cv.string,
                 vol.Lower,
-                vol.In(coordinator.lock_states.keys()),
+                vol.In(coordinator.lock_states_callbacks.keys()),
             ),
         }
     )
@@ -131,7 +131,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     set_pet_location_schema = vol.Schema(
         {
-            vol.Optional(ATTR_PET_NAME): vol.In(coordinator.get_pets().values()),
+            vol.Required(ATTR_PET_NAME): vol.In(coordinator.get_pets().keys()),
             vol.Required(ATTR_LOCATION): vol.In(
                 [
                     Location.INSIDE.name.title(),
@@ -171,7 +171,7 @@ class SurePetcareDataCoordinator(DataUpdateCoordinator):
             api_timeout=SURE_API_TIMEOUT,
             session=async_get_clientsession(hass),
         )
-        self.lock_states = {
+        self.lock_states_callbacks = {
             LockState.UNLOCKED.name.lower(): self.surepy.sac.unlock,
             LockState.LOCKED_IN.name.lower(): self.surepy.sac.lock_in,
             LockState.LOCKED_OUT.name.lower(): self.surepy.sac.lock_out,
@@ -188,6 +188,8 @@ class SurePetcareDataCoordinator(DataUpdateCoordinator):
         """Get the latest data from Sure Petcare."""
         try:
             return await self.surepy.get_entities(refresh=True)
+        except SurePetcareAuthenticationError as err:
+            raise ConfigEntryAuthFailed("Invalid username/password") from err
         except SurePetcareError as err:
             raise UpdateFailed(f"Unable to fetch data: {err}") from err
 
@@ -195,26 +197,21 @@ class SurePetcareDataCoordinator(DataUpdateCoordinator):
         """Call when setting the lock state."""
         flap_id = call.data[ATTR_FLAP_ID]
         state = call.data[ATTR_LOCK_STATE]
-        await self.lock_states[state](flap_id)
+        await self.lock_states_callbacks[state](flap_id)
         await self.async_request_refresh()
 
-    def get_pets(self) -> dict[int, str]:
+    def get_pets(self) -> dict[str, int]:
         """Get pets."""
-        names = {}
+        pets = {}
         for surepy_entity in self.data.values():
             if surepy_entity.type == EntityType.PET and surepy_entity.name:
-                names[surepy_entity.id] = surepy_entity.name
-        return names
+                pets[surepy_entity.name] = surepy_entity.id
+        return pets
 
     async def handle_set_pet_location(self, call: ServiceCall) -> None:
         """Call when setting the pet location."""
         pet_name = call.data[ATTR_PET_NAME]
         location = call.data[ATTR_LOCATION]
-        for device_id, device_name in self.get_pets().items():
-            if pet_name == device_name:
-                await self.surepy.sac.set_pet_location(
-                    device_id, Location[location.upper()]
-                )
-                await self.async_request_refresh()
-                return
-        _LOGGER.error("Unknown pet %s", pet_name)
+        device_id = self.get_pets()[pet_name]
+        await self.surepy.sac.set_pet_location(device_id, Location[location.upper()])
+        await self.async_request_refresh()

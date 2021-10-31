@@ -1,9 +1,10 @@
 """Represent the AsusWrt router."""
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import datetime, timedelta
 import logging
-from typing import Any, Callable
+from typing import Any
 
 from aioasuswrt.asuswrt import AsusWrt
 
@@ -385,13 +386,14 @@ class AsusWrtRouter:
     @property
     def device_info(self) -> DeviceInfo:
         """Return the device information."""
-        return {
-            "identifiers": {(DOMAIN, "AsusWRT")},
-            "name": self._host,
-            "model": self._model,
-            "manufacturer": "Asus",
-            "sw_version": self._sw_v,
-        }
+        return DeviceInfo(
+            identifiers={(DOMAIN, "AsusWRT")},
+            name=self._host,
+            model=self._model,
+            manufacturer="Asus",
+            sw_version=self._sw_v,
+            configuration_url=f"http://{self._host}",
+        )
 
     @property
     def signal_device_new(self) -> str:
