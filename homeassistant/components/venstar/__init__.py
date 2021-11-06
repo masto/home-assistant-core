@@ -19,7 +19,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import _LOGGER, DOMAIN, VENSTAR_TIMEOUT
 
-PLATFORMS = ["climate"]
+PLATFORMS = ["binary_sensor", "climate"]
 
 
 async def async_setup_entry(hass, config):
@@ -70,14 +70,13 @@ class VenstarDataUpdateCoordinator(update_coordinator.DataUpdateCoordinator):
         venstar_connection: VenstarColorTouch,
     ) -> None:
         """Initialize global Venstar data updater."""
-        self.client = venstar_connection
-
         super().__init__(
             hass,
             _LOGGER,
             name=DOMAIN,
             update_interval=timedelta(seconds=60),
         )
+        self.client = venstar_connection
 
     async def _async_update_data(self) -> None:
         """Update the state."""
@@ -97,11 +96,23 @@ class VenstarDataUpdateCoordinator(update_coordinator.DataUpdateCoordinator):
             raise update_coordinator.UpdateFailed(
                 f"Exception during Venstar sensor update: {ex}"
             ) from ex
+
+        # older venstars sometimes cannot handle rapid sequential connections
+        await asyncio.sleep(3)
+
+        try:
+            await self.hass.async_add_executor_job(self.client.update_alerts)
+        except (OSError, RequestException) as ex:
+            raise update_coordinator.UpdateFailed(
+                f"Exception during Venstar alert update: {ex}"
+            ) from ex
         return None
 
 
 class VenstarEntity(CoordinatorEntity):
     """Representation of a Venstar entity."""
+
+    coordinator: VenstarDataUpdateCoordinator
 
     def __init__(
         self,
@@ -111,22 +122,11 @@ class VenstarEntity(CoordinatorEntity):
         """Initialize the data object."""
         super().__init__(venstar_data_coordinator)
         self._config = config
-        self._update_attr()
-        self.coordinator = venstar_data_coordinator
-
-    @property
-    def _client(self):
-        """Return the venstar client."""
-        return self.coordinator.client
-
-    @callback
-    def _update_attr(self) -> None:
-        """Update the state and attributes."""
+        self._client = venstar_data_coordinator.client
 
     @callback
     def _handle_coordinator_update(self) -> None:
         """Handle updated data from the coordinator."""
-        self._update_attr()
         self.async_write_ha_state()
 
     @property
